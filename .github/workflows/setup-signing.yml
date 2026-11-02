@@ -10,6 +10,7 @@ permissions:
 jobs:
   initialize-signing:
     runs-on: macos-15
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,22 +18,39 @@ jobs:
       - name: Install Fastlane
         run: gem install fastlane --no-document
 
+      - name: Prepare Apple API key
+        run: |
+          ruby -rjson -e '
+            key = {
+              key_id: ENV.fetch("APPLE_KEY_ID"),
+              issuer_id: ENV.fetch("APPLE_ISSUER_ID"),
+              key: ENV.fetch("APPLE_KEY_CONTENT"),
+              duration: 1200,
+              in_house: false
+            }
+            File.write(
+              File.join(ENV.fetch("RUNNER_TEMP"), "AuthKey.json"),
+              JSON.generate(key)
+            )
+          '
+        env:
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_CONTENT: ${{ secrets.APPLE_KEY_CONTENT }}
+
       - name: Initialize Match
         run: |
-          mkdir -p fastlane
-          cat > fastlane/Matchfile <<'EOF'
-          git_url("https://github.com/HeyIamShiro/codeapp-certificates")
-          storage_mode("git")
-          type("appstore")
-          EOF
-
           fastlane match appstore \
             --app_identifier "com.heyiamshiro.codeapp,com.heyiamshiro.codeapp.extension" \
             --team_id "MA25SK6667" \
             --git_url "https://github.com/HeyIamShiro/codeapp-certificates" \
+            --git_branch "main" \
             --git_basic_authorization "$(printf 'x-access-token:%s' "$MATCH_GIT_TOKEN" | base64)" \
-            --api_key_path "$RUNNER_TEMP/AuthKey.json" \
-            --force
+            --api_key_path "$RUNNER_TEMP/AuthKey.json"
         env:
           MATCH_GIT_TOKEN: ${{ secrets.MATCH_GIT_TOKEN }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+
+      - name: Remove temporary API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.json"
