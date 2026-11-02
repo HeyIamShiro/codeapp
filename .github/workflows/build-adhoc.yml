@@ -1,0 +1,72 @@
+name: Build Ad Hoc IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Fastlane
+        run: gem install fastlane --no-document
+
+      - name: Prepare API key
+        env:
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_CONTENT: ${{ secrets.APPLE_KEY_CONTENT }}
+        run: |
+          ruby -rjson -e '
+            data = {
+              key_id: ENV.fetch("APPLE_KEY_ID"),
+              issuer_id: ENV.fetch("APPLE_ISSUER_ID"),
+              key: ENV.fetch("APPLE_KEY_CONTENT"),
+              duration: 1200,
+              in_house: false
+            }
+            File.write(
+              File.join(ENV.fetch("RUNNER_TEMP"), "AuthKey.json"),
+              JSON.generate(data),
+              mode: "w",
+              perm: 0600
+            )
+          '
+
+      - name: Build Ad Hoc IPA
+        env:
+          MATCH_GIT_TOKEN: ${{ secrets.MATCH_GIT_TOKEN }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_CONTENT: ${{ secrets.APPLE_KEY_CONTENT }}
+          TEMP_KEYCHAIN_PASSWORD: ${{ secrets.TEMP_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          gem install bundler --no-document
+          bundle install
+
+          GIT_AUTH="$(printf 'x-access-token:%s' "$MATCH_GIT_TOKEN" | base64)"
+
+          bundle exec fastlane ios adhoc_build \
+            api_key_path:"$RUNNER_TEMP/AuthKey.json" \
+            git_authorization:"$GIT_AUTH" \
+            keychain_password:"$TEMP_KEYCHAIN_PASSWORD"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeApp-AdHoc-IPA
+          path: Code.ipa
+          if-no-files-found: error
+
+      - name: Clean API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.json"
