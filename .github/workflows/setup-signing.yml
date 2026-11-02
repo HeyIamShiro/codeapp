@@ -2,7 +2,9 @@
 name: Initialize Apple Signing
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - setup-signing
 
 permissions:
   contents: read
