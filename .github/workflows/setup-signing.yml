@@ -1,5 +1,5 @@
 
-name: Initialize Apple Signing
+name: Diagnose Apple API Key
 
 on:
   push:
@@ -10,49 +10,64 @@ permissions:
   contents: read
 
 jobs:
-  initialize-signing:
+  diagnose-apple-key:
     runs-on: macos-15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Fastlane
-        run: gem install fastlane --no-document
+      - name: Install JWT dependency
+        run: gem install jwt --no-document
 
-      - name: Prepare Apple API key
-        run: |
-          ruby -rjson -e '
-            key = {
-              key_id: ENV.fetch("APPLE_KEY_ID"),
-              issuer_id: ENV.fetch("APPLE_ISSUER_ID"),
-              key: ENV.fetch("APPLE_KEY_CONTENT"),
-              duration: 1200,
-              in_house: false
-            }
-            File.write(
-              File.join(ENV.fetch("RUNNER_TEMP"), "AuthKey.json"),
-              JSON.generate(key)
-            )
-          '
+      - name: Validate key and test Apple API authentication
         env:
           APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
           APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
           APPLE_KEY_CONTENT: ${{ secrets.APPLE_KEY_CONTENT }}
-
-      - name: Initialize Match
         run: |
-          fastlane match appstore \
-            --app_identifier "com.heyiamshiro.codeapp,com.heyiamshiro.codeapp.extension" \
-            --team_id "MA25SK6667" \
-            --git_url "https://github.com/HeyIamShiro/codeapp-certificates" \
-            --git_branch "main" \
-            --git_basic_authorization "$(printf 'x-access-token:%s' "$MATCH_GIT_TOKEN" | base64)" \
-            --api_key_path "$RUNNER_TEMP/AuthKey.json"
-        env:
-          MATCH_GIT_TOKEN: ${{ secrets.MATCH_GIT_TOKEN }}
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          set -euo pipefail
 
-      - name: Remove temporary API key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/AuthKey.json"
+          ruby -ropenssl -rjwt -e '
+            key_id = ENV.fetch("APPLE_KEY_ID")
+            issuer_id = ENV.fetch("APPLE_ISSUER_ID")
+            pem = ENV.fetch("APPLE_KEY_CONTENT")
+
+            abort "Invalid Key ID format" unless key_id.match?(/\A[A-Z0-9]{10}\z/)
+            abort "Invalid Issuer ID format" unless issuer_id.match?(/\A[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\z/)
+
+            private_key = OpenSSL::PKey.read(pem)
+            abort "Not an EC P-256 key" unless private_key.is_a?(OpenSSL::PKey::EC) && private_key.group.curve_name == "prime256v1"
+
+            now = Time.now.to_i
+            token = JWT.encode(
+              { iss: issuer_id, iat: now, exp: now + 900, aud: "appstoreconnect-v1" },
+              private_key,
+              "ES256",
+              { kid: key_id, typ: "JWT" }
+            )
+
+            File.write(File.join(ENV.fetch("RUNNER_TEMP"), "apple-jwt.txt"), token, perm: 0600)
+            puts "Private key parsed: OK"
+            puts "Key ID format: OK"
+            puts "Issuer ID format: OK"
+            puts "JWT generated: OK (not printed)"
+          '
+
+          TOKEN="$(cat "$RUNNER_TEMP/apple-jwt.txt")"
+
+          STATUS="$(curl --silent --show-error \
+            --output "$RUNNER_TEMP/apple-response.json" \
+            --write-out "%{http_code}" \
+            --header "Authorization: Bearer $TOKEN" \
+            --header "Content-Type: application/json" \
+            "https://api.appstoreconnect.apple.com/v1/profiles?limit=1")"
+
+          echo "Apple API HTTP status: $STATUS"
+          cat "$RUNNER_TEMP/apple-response.json"
+
+          rm -f "$RUNNER_TEMP/apple-jwt.txt" "$RUNNER_TEMP/apple-response.json"
+
+          if [ "$STATUS" != "200" ]; then
+            exit 1
+          fi
