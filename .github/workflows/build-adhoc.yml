@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  # write: needed to replace the "adhoc" release used for over-the-air install.
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -72,76 +71,6 @@ jobs:
           name: CodeApp-AdHoc-IPA
           path: Code.ipa
           if-no-files-found: error
-
-      # Over-the-air install: iPadOS installs from an itms-services:// link that
-      # points at a manifest.plist served over HTTPS. Both files go on a single
-      # public pre-release tagged "adhoc" that is replaced on every build, so
-      # the install link never changes. The IPA only installs on devices whose
-      # UDID is in the Ad Hoc profile.
-      - name: Publish OTA install release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: adhoc
-          BUNDLE_ID: com.heyiamshiro.codeapp
-        run: |
-          set -euo pipefail
-
-          BASE_URL="https://github.com/${GH_REPO}/releases/download/${TAG}"
-
-          unzip -p Code.ipa 'Payload/*.app/Info.plist' > "$RUNNER_TEMP/Info.plist"
-          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RUNNER_TEMP/Info.plist")"
-          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$RUNNER_TEMP/Info.plist")"
-
-          cat > manifest.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>items</key>
-            <array>
-              <dict>
-                <key>assets</key>
-                <array>
-                  <dict>
-                    <key>kind</key>
-                    <string>software-package</string>
-                    <key>url</key>
-                    <string>${BASE_URL}/Code.ipa</string>
-                  </dict>
-                </array>
-                <key>metadata</key>
-                <dict>
-                  <key>bundle-identifier</key>
-                  <string>${BUNDLE_ID}</string>
-                  <key>bundle-version</key>
-                  <string>${VERSION}</string>
-                  <key>kind</key>
-                  <string>software</string>
-                  <key>title</key>
-                  <string>Code App</string>
-                </dict>
-              </dict>
-            </array>
-          </dict>
-          </plist>
-          EOF
-          plutil -lint manifest.plist
-
-          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
-          gh release create "$TAG" Code.ipa manifest.plist \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --title "Ad Hoc build #${GITHUB_RUN_NUMBER} (${VERSION} build ${BUILD})" \
-            --notes "Ad Hoc build of ${GITHUB_SHA} from run ${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID}. Install on the iPad by opening this in Safari: itms-services://?action=download-manifest&url=${BASE_URL}/manifest.plist"
-
-          {
-            echo "### Install on iPad"
-            echo "Paste into Safari on the iPad:"
-            echo '```'
-            echo "itms-services://?action=download-manifest&url=${BASE_URL}/manifest.plist"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clean API key
         if: always()
