@@ -14,8 +14,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned to the version that wrote the Match repo (match_version.txt).
+      # The Gemfile.lock pin (2.205.1) cannot decrypt match_encrypted_v2 files.
       - name: Install Fastlane
-        run: gem install fastlane --no-document
+        run: gem install fastlane -v 2.241.2 --no-document
 
       - name: Prepare API key
         env:
@@ -46,19 +48,19 @@ jobs:
           APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
           APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
           APPLE_KEY_CONTENT: ${{ secrets.APPLE_KEY_CONTENT }}
-          TEMP_KEYCHAIN_PASSWORD: ${{ secrets.TEMP_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
 
-          gem install bundler --no-document
-          bundle install
+          # The temporary keychain only lives on this ephemeral runner, so a
+          # random per-run password is safer than a stored secret.
+          TEMP_KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$TEMP_KEYCHAIN_PASSWORD"
+          export TEMP_KEYCHAIN_PASSWORD
 
           GIT_AUTH="$(printf 'x-access-token:%s' "$MATCH_GIT_TOKEN" | base64)"
 
-          bundle exec fastlane ios adhoc_build \
-            api_key_path:"$RUNNER_TEMP/AuthKey.json" \
-            git_authorization:"$GIT_AUTH" \
-            keychain_password:"$TEMP_KEYCHAIN_PASSWORD"
+          fastlane _2.241.2_ ios adhoc_build \
+            git_authorization:"$GIT_AUTH"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
