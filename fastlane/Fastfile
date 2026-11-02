@@ -96,7 +96,6 @@ platform :ios do
       wait_processing_interval: 300
     )
     
-
     delete_temp_keychain(keychain_name)
   end
 
@@ -107,4 +106,55 @@ platform :ios do
     end
     run_tests(scheme: "Code UI")
   end
+
+    lane :adhoc_build do |options|
+    keychain_name = "codeapp_adhoc"
+    keychain_password = options[:keychain_password]
+
+    create_keychain(
+      name: keychain_name,
+      password: keychain_password,
+      unlock: true,
+      timeout: 3600,
+      default_keychain: true
+    )
+
+    api_key = app_store_connect_api_key(
+      key_id: APPLE_KEY_ID,
+      issuer_id: APPLE_ISSUER_ID,
+      key_content: APPLE_KEY_CONTENT,
+      duration: 1200,
+      in_house: false
+    )
+
+    Dir.chdir("..") do
+      sh("./downloadFrameworks.sh")
+      sh(%Q[echo 'let JUDGE0_ENDPOINT = ""' > CodeApp/Constants/Secrets.swift])
+      sh(%Q[echo 'let JUDGE0_KEY = ""' >> CodeApp/Constants/Secrets.swift])
+    end
+
+    match(
+      type: "adhoc",
+      app_identifier: [
+        "com.heyiamshiro.codeapp",
+        "com.heyiamshiro.codeapp.extension"
+      ],
+      git_basic_authorization: options[:git_authorization],
+      readonly: true,
+      keychain_name: keychain_name,
+      keychain_password: keychain_password,
+      api_key: api_key
+    )
+
+    gym(
+      project: "Code.xcodeproj",
+      scheme: "Code App",
+      configuration: "Release",
+      export_method: "ad-hoc",
+      output_name: "Code.ipa"
+    )
+
+    delete_keychain(name: keychain_name)
+  end
+
 end
