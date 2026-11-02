@@ -8,7 +8,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    # Same runner/Xcode as upstream build.yml: CodeApp/Iconv2.icon is an
+    # Icon Composer file that Xcode 16 cannot compile.
+    runs-on: macos-26
 
     steps:
       - name: Checkout
@@ -48,6 +50,7 @@ jobs:
           APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
           APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
           APPLE_KEY_CONTENT: ${{ secrets.APPLE_KEY_CONTENT }}
+          XCODE_PATH: /Applications/Xcode_26.2.app
         run: |
           set -euo pipefail
 
